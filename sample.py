@@ -68,7 +68,7 @@ def request_access_token(auth_host, client_id, pem_file):
 
 # Calculate seconds to sleep between retries.
 #
-# slot_time is amount of time to for each slot and is multipled by the slot
+# slot_time is amount of time to for each slot and is multiplied by the slot
 # random calculated slot to get the total sleep time.
 #
 # max_slots can be used to put an upper bound on the sleep time
