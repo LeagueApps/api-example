@@ -18,7 +18,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--site-id', type=int, required=True)
 parser.add_argument('--client-id', required=True, help='client id for site.  Probably the same as the certificate filename basename')
 parser.add_argument('--pem-file', required=True, help='filename for certificate key in PEM format')
-parser.add_argument('--type', required=True, choices=['registrations-2','members-2','transactions-2'], help='type of records to export')
+parser.add_argument('--type', required=True, choices=['registrations-2','members-2','transactions-2', 'accountingCodes'], help='type of records to export')
 parser.add_argument('--domain', default='leagueapps.io')
 parser.add_argument('--auth', default='https://auth.leagueapps.io')
 args = parser.parse_args()
@@ -35,6 +35,7 @@ else:
 
 site_id=args.site_id
 record_type=args.type
+
 
 # Make a request to the OAuth 2 token endpoint with a JWT assertion to get an
 # access_token
@@ -65,6 +66,7 @@ def request_access_token(auth_host, client_id, pem_file):
     else:
         print('failed to get access_token: ({}) {}'.format(response.status_code, response.text))
         return None
+
 
 # Calculate seconds to sleep between retries.
 #
@@ -145,9 +147,19 @@ while attempts < max_attempts:
 
     # process the result records and do useful things with them
     print('processing batch {}, {} records'.format(batch_count, len(records)))
+    printFile = open("records.json", "w+")
+
+    def remove_uni(s):
+        s2 = s.replace("u'", "'")
+        s2 = s2.replace('u"', '"')
+        return s2
+    printFile.write("[")
     for record in records:
         #print('record id: {}, {}'.format(record['id'], record['lastUpdated']))
         # track last_updated and last_id so next request will fetch more records
         last_updated = record['lastUpdated']
         last_id = record['id']
+        printFile.write(remove_uni(str(record)) + ",")
 
+    printFile.write("]")
+    printFile.close()
