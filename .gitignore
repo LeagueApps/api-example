@@ -1,3 +1,7 @@
+## Don't commit your API keys!
+*.p12
+*.pem
+
 ## IDE
 .idea
 **.iml
