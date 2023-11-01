@@ -1,0 +1,11 @@
+name: 'Off-site github backup'
+on:
+  push:
+    branches: [ 'main' ]
+jobs:
+  backup:
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+    uses: 'LeagueApps/shared-workflows/.github/workflows/backup.yml@main'
+    secrets: inherit
