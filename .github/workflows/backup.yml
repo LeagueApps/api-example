@@ -1,4 +1,4 @@
-name: 'Off-site github backup'
+name: 'off-site backup'
 on:
   push:
     branches: [ 'main' ]
@@ -7,5 +7,24 @@ jobs:
     permissions:
       contents: 'read'
       id-token: 'write'
-    uses: 'LeagueApps/shared-workflows/.github/workflows/backup.yml@main'
-    secrets: inherit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - id: auth
+        name: Auth to GCP
+        # uses https://cloud.google.com/iam/docs/workload-identity-federation
+        uses: google-github-actions/auth@35b0e87d162680511bf346c299f71c9c5c379033
+        with:
+          workload_identity_provider: 'projects/184404783609/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions'
+          service_account: 'backup-bucket-writer@leagueapps-com.iam.gserviceaccount.com'
+      - name: Set Up GCloud
+        uses: google-github-actions/setup-gcloud@e30db14379863a8c79331b04a9969f4c1e225e0b
+        with:
+          # would be better to use version_constraint, but it's blocked (see issue 618 in setup-gcloud repo)
+          skip_install: true
+      - run: |
+          REPOSITORY=$(echo $GITHUB_REPOSITORY | cut -f 2,2 -d /)
+          tar -cf ../$REPOSITORY.tar .
+          gsutil cp ../$REPOSITORY.tar gs://leagueapps-github-backup/$REPOSITORY.tar
+        shell: bash
+        name: backup script
