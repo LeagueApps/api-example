@@ -7,6 +7,7 @@
 # install dependencies with: python -m pip install -r requirements.txt
 
 import argparse
+import json
 import time
 import random
 
@@ -96,6 +97,7 @@ batch_count = 0
 # Maximum number of retries for a request
 max_attempts = 5
 attempts = 0
+combined_data = []
 while attempts < max_attempts:
     attempts += 1
 
@@ -148,7 +150,7 @@ while attempts < max_attempts:
         break
 
     # get the actual response JSON data
-    records = response.json()
+    records = json.loads(response.text)
 
     # No more records, exit.
     if len(records) == 0:
@@ -162,26 +164,20 @@ while attempts < max_attempts:
 
     # process the result records and do useful things with them
     print('processing batch {}, {} records'.format(batch_count, len(records)))
-    printFile = open("records.json", "w+")
+    combined_data.extend(records)
 
 
-    def remove_uni(s):
-        s2 = s.replace("u'", "'")
-        s2 = s2.replace('u"', '"')
-        return s2
-
-
-    printFile.write("[")
     for record in records:
         # print('record id: {}, {}'.format(record['id'], record['lastUpdated']))
         # track last_updated and last_id so next request will fetch more records
         if record_type != 'accountingCodes':  # accountingCodes endpoint doesn't return this data
             last_updated = record['lastUpdated']
             last_id = record['id']
-        printFile.write(remove_uni(str(record)) + ",")
 
-    printFile.write("]")
-    printFile.close()
 
     if record_type == 'accountingCodes':
         break  # accountingCodes endpoint is not paginated, so no need to loop
+
+printFile = open("records.json", "w+")
+printFile.write(json.dumps(combined_data))
+printFile.close()
