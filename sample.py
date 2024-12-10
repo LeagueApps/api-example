@@ -4,33 +4,33 @@
 # results.  A limited number of results are returned in each response.  It can
 # vary based on the type, but is generally around 1000 records.
 
-# install dependencies with: python -m pip install -r requirements.txt
+# ubuntu 16.04: sudo apt install python-jwt python-crypto python-requests
+# untested: pip install pyjwt crypto requests2
 
 import argparse
-import json
 import time
 import random
 
 import jwt
 import requests
+import json
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--site-id', type=int, required=True)
 parser.add_argument('--client-id', required=True,
                     help='client id for site.  Probably the same as the certificate filename basename')
 parser.add_argument('--pem-file', required=True, help='filename for certificate key in PEM format')
-parser.add_argument('--type', required=True,
-                    choices=['registrations-2', 'members-2', 'transactions-2', 'accountingCodes'],
+parser.add_argument('--type', required=True, choices=['registrations-2', 'members-2', 'transactions-2'],
                     help='type of records to export')
 parser.add_argument('--domain', default='leagueapps.io')
 parser.add_argument('--auth', default='https://auth.leagueapps.io')
+parser.add_argument('--last-updated', type=int, default=0)
+parser.add_argument('--last-id', type=int, default=0)
 args = parser.parse_args()
 
 if args.auth:
     print("using auth server {}".format(args.auth))
     auth_host = args.auth
-else:
-    auth_host = 'https://auth.leagueapps.io'
 
 if args.domain == 'lapps-local.io':
     # for local testing the Google ESP isn't HTTPS
@@ -44,12 +44,11 @@ record_type = args.type
 
 # Make a request to the OAuth 2 token endpoint with a JWT assertion to get an
 # access_token
-def request_access_token(auth_host_url, client_id, pem_file):
+def request_access_token(auth_host, client_id, pem_file):
     with open(pem_file, 'r') as f:
         key = f.read()
 
     now = int(time.time())
-    auth_url = '{}/v2/auth/token'.format(auth_host_url)
 
     claims = {
         'aud': 'https://auth.leagueapps.io/v2/auth/token',
@@ -61,35 +60,37 @@ def request_access_token(auth_host_url, client_id, pem_file):
 
     assertion = jwt.encode(claims, key, algorithm='RS256')
 
-    resp = requests.post(auth_url,
-                         data={'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
-                               'assertion': assertion})
+    auth_url = '{}/v2/auth/token'.format(auth_host)
 
-    if resp.status_code == 200:
-        return resp.json()['access_token']
+    response = requests.post(auth_url,
+                             data={'grant_type': 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+                                   'assertion': assertion})
+
+    if response.status_code == 200:
+        return response.json()['access_token']
     else:
-        print('failed to get access_token: ({}) {}'.format(resp.status_code, resp.text))
+        print('failed to get access_token: ({}) {}'.format(response.status_code, response.text))
         return None
 
 
 # Calculate seconds to sleep between retries.
 #
-# slot_time is amount of time to for each slot and is multiplied by the slot
+# slot_time is amount of time to for each slot and is multipled by the slot
 # random calculated slot to get the total sleep time.
 #
 # max_slots can be used to put an upper bound on the sleep time
-def exponential_backoff(attempts_so_far, slot_time=1.0, max_slots=0):
+def exponential_backoff(attempts, slot_time=1, max_slots=0):
     if max_slots > 0:
-        attempts_so_far = min(attempts_so_far, max_slots)
+        attempts = min(attempts, max_slots)
 
-    return random.randint(0, 2 ** attempts_so_far - 1) * slot_time
+    return random.randint(0, 2 ** attempts - 1) * slot_time
 
 
 # Initialize the last-updated and last-id query parameters to be used between
 # requests.  These should be updated after processing each batch of responses
 # to get more results.
-last_updated = 0
-last_id = 0
+last_updated = args.last_updated
+last_id = args.last_id
 
 access_token = None
 batch_count = 0
@@ -97,7 +98,6 @@ batch_count = 0
 # Maximum number of retries for a request
 max_attempts = 5
 attempts = 0
-combined_data = []
 while attempts < max_attempts:
     attempts += 1
 
@@ -114,19 +114,8 @@ while attempts < max_attempts:
     # set the access token in the request header
     headers = {'authorization': 'Bearer {}'.format(access_token)}
 
-    if record_type == 'accountingCodes':  # accountingCodes endpoint doesn't have /export/ in it
-        url = '{}/v2/sites/{}/{}'.format(admin_host, site_id, record_type)
-    else:
-        url = '{}/v2/sites/{}/export/{}'.format(admin_host, site_id, record_type)
-
-    try:
-        response = requests.get(url, params=params,
-                                headers=headers, timeout=10)
-    except requests.exceptions.Timeout:
-        wait_seconds = exponential_backoff(attempts, 1.42, 5)
-        print('retry in {} seconds due to timeout'.format(wait_seconds))
-        time.sleep(wait_seconds)
-        continue
+    response = requests.get('{}/v2/sites/{}/export/{}'.format(admin_host, site_id, record_type), params=params,
+                            headers=headers)
 
     # access_token is invalid, clear so next pass through the loop will get a new one
     if response.status_code == 401:
@@ -140,7 +129,7 @@ while attempts < max_attempts:
         # sleep an exponential back-off amount of time
         wait_seconds = exponential_backoff(attempts, 1.42, 5)
         print('retry in {} on error status ({}): {}'.format(wait_seconds, response.status_code, response.reason))
-        time.sleep(wait_seconds)
+        time.sleep(wait_seconds);
         continue
 
     # error on request that can't be retried
@@ -150,34 +139,23 @@ while attempts < max_attempts:
         break
 
     # get the actual response JSON data
-    records = json.loads(response.text)
+    records = response.json()
 
     # No more records, exit.
-    if len(records) == 0:
+    if (len(records) == 0):
         print('done.')
         break
 
     batch_count += 1
-
+    with open('./registrations_{}'.format(batch_count)+'.json', 'w+') as file:
+        json.dump(records, file)
     # successful request, reset retry attempts
     attempts = 0
 
     # process the result records and do useful things with them
     print('processing batch {}, {} records'.format(batch_count, len(records)))
-    combined_data.extend(records)
-
-
     for record in records:
         # print('record id: {}, {}'.format(record['id'], record['lastUpdated']))
         # track last_updated and last_id so next request will fetch more records
-        if record_type != 'accountingCodes':  # accountingCodes endpoint doesn't return this data
-            last_updated = record['lastUpdated']
-            last_id = record['id']
-
-
-    if record_type == 'accountingCodes':
-        break  # accountingCodes endpoint is not paginated, so no need to loop
-
-printFile = open("records.json", "w+")
-printFile.write(json.dumps(combined_data))
-printFile.close()
+        last_updated = record['lastUpdated']
+        last_id = record['id']
