@@ -24,6 +24,8 @@ parser.add_argument('--type', required=True,
                     help='type of records to export')
 parser.add_argument('--domain', default='leagueapps.io')
 parser.add_argument('--auth', default='https://auth.leagueapps.io')
+parser.add_argument('--last-updated', type=int, default=0)
+parser.add_argument('--last-id', type=int, default=0)
 args = parser.parse_args()
 
 if args.auth:
@@ -88,8 +90,8 @@ def exponential_backoff(attempts_so_far, slot_time=1.0, max_slots=0):
 # Initialize the last-updated and last-id query parameters to be used between
 # requests.  These should be updated after processing each batch of responses
 # to get more results.
-last_updated = 0
-last_id = 0
+last_updated = args.last_updated
+last_id = args.last_id
 
 access_token = None
 batch_count = 0
