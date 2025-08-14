@@ -35,16 +35,6 @@ if args.auth:
 else:
     auth_host = 'https://auth.leagueapps.io'
 
-if args.domain == 'lapps-local.io':
-    # for local testing the Google ESP isn't HTTPS
-    admin_host = 'http://admin.{}:8082'.format(args.domain)
-else:
-    admin_host = 'https://admin.{}'.format(args.domain)
-
-site_id = args.site_id
-record_type = args.type
-
-
 # Make a request to the OAuth 2 token endpoint with a JWT assertion to get an
 # access_token
 def request_access_token(auth_host_url, client_id, pem_file):
@@ -74,7 +64,6 @@ def request_access_token(auth_host_url, client_id, pem_file):
         print('failed to get access_token: ({}) {}'.format(resp.status_code, resp.text))
         return None
 
-
 # Calculate seconds to sleep between retries.
 #
 # slot_time is amount of time to for each slot and is multiplied by the slot
@@ -87,6 +76,21 @@ def exponential_backoff(attempts_so_far, slot_time=1.0, max_slots=0):
 
     return random.randint(0, 2 ** attempts_so_far - 1) * slot_time
 
+site_id = args.site_id
+record_type = args.type
+domain = args.domain
+sub_domain = 'admin'
+
+if record_type == 'accountingCodes':  # accountingCodes endpoint doesn't have /export/ in it
+    path = 'v2/sites/{}/{}'.format(site_id, record_type)
+else:
+    path = 'v2/sites/{}/export/{}'.format(site_id, record_type)
+
+if domain == 'lapps-local.io':
+    # for local testing the Google ESP isn't HTTPS
+    url = 'http://{}.{}:8082/{}'.format(sub_domain, domain, path)
+else:
+    url = 'https://{}.{}/{}'.format(sub_domain, domain, path)
 
 # Initialize the last-updated and last-id query parameters to be used between
 # requests.  These should be updated after processing each batch of responses
@@ -117,11 +121,6 @@ while attempts < max_attempts:
     params = {'last-updated': last_updated, 'last-id': last_id}
     # set the access token in the request header
     headers = {'authorization': 'Bearer {}'.format(access_token)}
-
-    if record_type == 'accountingCodes':  # accountingCodes endpoint doesn't have /export/ in it
-        url = '{}/v2/sites/{}/{}'.format(admin_host, site_id, record_type)
-    else:
-        url = '{}/v2/sites/{}/export/{}'.format(admin_host, site_id, record_type)
 
     # Add any additional parameters passed via command line, but exclude existing ones
     if args.additional_params:
@@ -193,8 +192,6 @@ while attempts < max_attempts:
         # track last_updated and last_id so next request will fetch more records
         last_updated = record.get('lastUpdated')
         last_id = record.get('id')
-
-
 
 printFile = open("records.json", "w+")
 printFile.write(json.dumps(combined_data))
