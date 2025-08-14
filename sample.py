@@ -26,6 +26,7 @@ parser.add_argument('--domain', default='leagueapps.io')
 parser.add_argument('--auth', default='https://auth.leagueapps.io')
 parser.add_argument('--last-updated', type=int, default=0)
 parser.add_argument('--last-id', type=int, default=0)
+parser.add_argument('--additional-params', nargs='*', help='additional query parameters in format key=value')
 args = parser.parse_args()
 
 if args.auth:
@@ -120,6 +121,16 @@ while attempts < max_attempts:
         url = '{}/v2/sites/{}/{}'.format(admin_host, site_id, record_type)
     else:
         url = '{}/v2/sites/{}/export/{}'.format(admin_host, site_id, record_type)
+
+    # Add any additional parameters passed via command line, but exclude existing ones
+    if args.additional_params:
+        for param in args.additional_params:
+            if '=' in param:
+                key, value = param.split('=', 1)
+                if key not in params:
+                    params[key] = value
+                else:
+                    print(f"Warning: ignoring parameter '{key}' from additional-params (already set)")
 
     try:
         response = requests.get(url, params=params,
