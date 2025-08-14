@@ -93,6 +93,7 @@ def exponential_backoff(attempts_so_far, slot_time=1.0, max_slots=0):
 # to get more results.
 last_updated = args.last_updated
 last_id = args.last_id
+supports_last_values = record_type != 'accountingCodes'
 
 access_token = None
 batch_count = 0
@@ -165,6 +166,12 @@ while attempts < max_attempts:
     # get the actual response JSON data
     records = json.loads(response.text)
 
+    # Filter out the first record if it has same id AND lastUpdated as previous batch to avoid duplicates
+    if supports_last_values and last_id > 0 and last_updated > 0 and len(records) > 0:
+        first_record = records[0]
+        if first_record.get('id') == last_id and first_record.get('lastUpdated') == last_updated:
+            records = records[1:]  # Remove first record, keep the rest
+
     # No more records, exit.
     if len(records) == 0:
         print('done.')
@@ -179,17 +186,15 @@ while attempts < max_attempts:
     print('processing batch {}, {} records'.format(batch_count, len(records)))
     combined_data.extend(records)
 
+    if not supports_last_values:
+        break  # accountingCodes endpoint is not paginated, so no need to loop
 
     for record in records:
-        # print('record id: {}, {}'.format(record['id'], record['lastUpdated']))
         # track last_updated and last_id so next request will fetch more records
-        if record_type != 'accountingCodes':  # accountingCodes endpoint doesn't return this data
-            last_updated = record['lastUpdated']
-            last_id = record['id']
+        last_updated = record.get('lastUpdated')
+        last_id = record.get('id')
 
 
-    if record_type == 'accountingCodes':
-        break  # accountingCodes endpoint is not paginated, so no need to loop
 
 printFile = open("records.json", "w+")
 printFile.write(json.dumps(combined_data))
