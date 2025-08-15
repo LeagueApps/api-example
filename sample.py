@@ -26,6 +26,7 @@ parser.add_argument('--domain', default='leagueapps.io')
 parser.add_argument('--auth', default='https://auth.leagueapps.io')
 parser.add_argument('--last-updated', type=int, default=0)
 parser.add_argument('--last-id', type=int, default=0)
+parser.add_argument('--additional-params', nargs='*', help='additional query parameters in format key=value')
 args = parser.parse_args()
 
 if args.auth:
@@ -33,16 +34,6 @@ if args.auth:
     auth_host = args.auth
 else:
     auth_host = 'https://auth.leagueapps.io'
-
-if args.domain == 'lapps-local.io':
-    # for local testing the Google ESP isn't HTTPS
-    admin_host = 'http://admin.{}:8082'.format(args.domain)
-else:
-    admin_host = 'https://admin.{}'.format(args.domain)
-
-site_id = args.site_id
-record_type = args.type
-
 
 # Make a request to the OAuth 2 token endpoint with a JWT assertion to get an
 # access_token
@@ -73,7 +64,6 @@ def request_access_token(auth_host_url, client_id, pem_file):
         print('failed to get access_token: ({}) {}'.format(resp.status_code, resp.text))
         return None
 
-
 # Calculate seconds to sleep between retries.
 #
 # slot_time is amount of time to for each slot and is multiplied by the slot
@@ -86,12 +76,28 @@ def exponential_backoff(attempts_so_far, slot_time=1.0, max_slots=0):
 
     return random.randint(0, 2 ** attempts_so_far - 1) * slot_time
 
+site_id = args.site_id
+record_type = args.type
+domain = args.domain
+sub_domain = 'admin'
+
+if record_type == 'accountingCodes':  # accountingCodes endpoint doesn't have /export/ in it
+    path = 'v2/sites/{}/{}'.format(site_id, record_type)
+else:
+    path = 'v2/sites/{}/export/{}'.format(site_id, record_type)
+
+if domain == 'lapps-local.io':
+    # for local testing the Google ESP isn't HTTPS
+    url = 'http://{}.{}:8082/{}'.format(sub_domain, domain, path)
+else:
+    url = 'https://{}.{}/{}'.format(sub_domain, domain, path)
 
 # Initialize the last-updated and last-id query parameters to be used between
 # requests.  These should be updated after processing each batch of responses
 # to get more results.
 last_updated = args.last_updated
 last_id = args.last_id
+supports_last_values = record_type != 'accountingCodes'
 
 access_token = None
 batch_count = 0
@@ -116,10 +122,15 @@ while attempts < max_attempts:
     # set the access token in the request header
     headers = {'authorization': 'Bearer {}'.format(access_token)}
 
-    if record_type == 'accountingCodes':  # accountingCodes endpoint doesn't have /export/ in it
-        url = '{}/v2/sites/{}/{}'.format(admin_host, site_id, record_type)
-    else:
-        url = '{}/v2/sites/{}/export/{}'.format(admin_host, site_id, record_type)
+    # Add any additional parameters passed via command line, but exclude existing ones
+    if args.additional_params:
+        for param in args.additional_params:
+            if '=' in param:
+                key, value = param.split('=', 1)
+                if key not in params:
+                    params[key] = value
+                else:
+                    print(f"Warning: ignoring parameter '{key}' from additional-params (already set)")
 
     try:
         response = requests.get(url, params=params,
@@ -154,6 +165,12 @@ while attempts < max_attempts:
     # get the actual response JSON data
     records = json.loads(response.text)
 
+    # Filter out the first record if it has same id AND lastUpdated as previous batch to avoid duplicates
+    if supports_last_values and last_id > 0 and last_updated > 0 and len(records) > 0:
+        first_record = records[0]
+        if first_record.get('id') == last_id and first_record.get('lastUpdated') == last_updated:
+            records = records[1:]  # Remove first record, keep the rest
+
     # No more records, exit.
     if len(records) == 0:
         print('done.')
@@ -168,17 +185,13 @@ while attempts < max_attempts:
     print('processing batch {}, {} records'.format(batch_count, len(records)))
     combined_data.extend(records)
 
+    if not supports_last_values:
+        break  # accountingCodes endpoint is not paginated, so no need to loop
 
     for record in records:
-        # print('record id: {}, {}'.format(record['id'], record['lastUpdated']))
         # track last_updated and last_id so next request will fetch more records
-        if record_type != 'accountingCodes':  # accountingCodes endpoint doesn't return this data
-            last_updated = record['lastUpdated']
-            last_id = record['id']
-
-
-    if record_type == 'accountingCodes':
-        break  # accountingCodes endpoint is not paginated, so no need to loop
+        last_updated = record.get('lastUpdated')
+        last_id = record.get('id')
 
 printFile = open("records.json", "w+")
 printFile.write(json.dumps(combined_data))
